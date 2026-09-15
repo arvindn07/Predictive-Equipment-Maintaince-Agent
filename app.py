@@ -9,7 +9,7 @@ import time
 
 # ── Page Config ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Predictive Maintenance Dashboard",
+    page_title="machine-health-monitor",
     page_icon="⚙️",
     layout="wide"
 )
@@ -122,7 +122,7 @@ def build_recommendation(level, last):
     return headline, body, findings
 
 # ── UI ────────────────────────────────────────────────────────────────────────
-st.title("🏭 Predictive Machine Maintenance System")
+st.title("machine-health-monitor 🏭")
 st.markdown("Real-time telemetry from the *(Simulator)* is analyzed via a **Random Forest** AI Model.")
 
 sidebar, main = st.columns([1, 4])
