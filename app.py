@@ -9,11 +9,26 @@ import time
 
 # ── Page Config ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Machine-health-monitor",
+    page_title="Predictive Maintenance Dashboard",
     page_icon="⚙️",
     layout="wide"
 )
 
+# Trim default padding so everything fits without scrolling
+st.markdown(
+    """
+    <style>
+        .block-container { padding-top: 1rem; padding-bottom: 0.5rem; }
+        div[data-testid="stMetricValue"] { font-size: 1.3rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+# app.py sits at the repo root, alongside the models/ and data/ folders.
+# If you move app.py into a subfolder (e.g. src/app.py), change the line below
+# to: os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SHARED_DATA_FILE = os.path.join(BASE_DIR, "data", "shared_data.json")
 MODEL_PATH       = os.path.join(BASE_DIR, "models", "rf_model.joblib")
@@ -52,7 +67,11 @@ def read_sensor_file():
         pass
     return None
 
-
+# ── Fallback: generate telemetry internally when no external simulator.py ─────
+# process is writing to the shared file (e.g. when deployed on Streamlit
+# Community Cloud, which only runs this single app.py — it can't also run a
+# second simulator.py process). Mirrors the same "gradual fault" pattern as
+# simulator.py, but keeps its state in st.session_state instead of a file.
 def get_internal_reading():
     import random
 
@@ -127,53 +146,38 @@ def build_recommendation(level, last):
 
     if last["Process temperature"] > BASELINES["Process temperature"] + 5:
         findings.append(
-            f"**Process temperature** is elevated at {last['Process temperature']} K "
-            f"(baseline ~{BASELINES['Process temperature']} K) — check the cooling/"
-            f"lubrication system for a possible overheating condition."
+            f"**Process temperature** elevated at {last['Process temperature']} K "
+            f"(baseline ~{BASELINES['Process temperature']} K) — check cooling/lubrication."
         )
     if last["Air temperature"] > BASELINES["Air temperature"] + 3:
         findings.append(
-            f"**Air temperature** is above normal at {last['Air temperature']} K "
-            f"(baseline ~{BASELINES['Air temperature']} K) — check ambient/ventilation "
-            f"conditions around the machine."
+            f"**Air temperature** above normal at {last['Air temperature']} K "
+            f"(baseline ~{BASELINES['Air temperature']} K) — check ambient/ventilation."
         )
     if last["Rotational speed"] < BASELINES["Rotational speed"] - 100:
         findings.append(
-            f"**Rotational speed** has dropped to {last['Rotational speed']} RPM "
-            f"(baseline ~{BASELINES['Rotational speed']} RPM) — inspect for belt "
-            f"slippage, bearing wear, or motor load issues."
+            f"**Rotational speed** dropped to {last['Rotational speed']} RPM "
+            f"(baseline ~{BASELINES['Rotational speed']} RPM) — check belt/bearing wear."
         )
     if last["Torque"] > BASELINES["Torque"] + 8:
         findings.append(
-            f"**Torque** is elevated at {last['Torque']} Nm "
-            f"(baseline ~{BASELINES['Torque']} Nm) — inspect for mechanical binding, "
-            f"misalignment, or an overload condition."
+            f"**Torque** elevated at {last['Torque']} Nm "
+            f"(baseline ~{BASELINES['Torque']} Nm) — check for binding/overload."
         )
     if last["Tool wear"] > 150:
         findings.append(
-            f"**Tool wear** is high at {last['Tool wear']} min — schedule a tool "
-            f"replacement soon to avoid degraded part quality."
+            f"**Tool wear** high at {last['Tool wear']} min — schedule a tool replacement."
         )
 
     if level == "SAFE":
         headline = "No action required."
-        body = (
-            "All telemetry is within its normal operating range. Continue routine "
-            "monitoring — no maintenance action is needed right now."
-        )
+        body = "All telemetry is within its normal operating range."
     elif level == "WARNING":
         headline = "Schedule an inspection soon."
-        body = (
-            "Telemetry is drifting outside normal range. The machine can keep "
-            "running, but plan an inspection at the next convenient maintenance "
-            "window before the condition worsens."
-        )
+        body = "Telemetry is drifting outside normal range — plan a maintenance check."
     else:
         headline = "Stop the machine and inspect immediately."
-        body = (
-            "Failure risk is high. Halt production on this machine and perform an "
-            "immediate manual inspection before resuming operation."
-        )
+        body = "Failure risk is high — halt production and inspect now."
 
     if not findings:
         findings.append("No individual sensor has crossed its abnormal threshold yet.")
@@ -181,178 +185,156 @@ def build_recommendation(level, last):
     return headline, body, findings
 
 # ── UI ────────────────────────────────────────────────────────────────────────
-st.title("Machine-Health-Monitor 🏭")
-st.markdown("Real-time telemetry from the *(Simulator)* is analyzed via a **Random Forest** AI Model.")
+st.markdown("## 🏭 Predictive Machine Maintenance System")
 
-sidebar, main = st.columns([1, 4])
+raw = read_sensor_file()
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
-with sidebar:
-    st.header("Control Panel")
-    st.markdown("---")
-    st.markdown("**ML Model**")
-    if model:
-        st.success("✅ Loaded (Random Forest)")
-    else:
-        st.error("❌ Not Found")
-    st.markdown("---")
-    st.markdown("**How to use:**")
-    st.info(
-        "1. Run this dashboard\n"
-        "2. Open **localhost:8505**\n"
-        "3. Start `simulator.py` in a second terminal\n"
-        "4. Data appears automatically ✅"
+# Check freshness: data must be written in the last 3 seconds
+external_sim_live = (
+    raw is not None
+    and time.time() - raw.get("Timestamp_raw", 0) < 3.0
+)
+
+if external_sim_live:
+    data_source_caption = "📡 Live data source: external `simulator.py` process"
+else:
+    data_source_caption = "🧪 Live data source: built-in simulator (no external `simulator.py` detected)"
+    raw = get_internal_reading()
+
+model_status = "✅ Random Forest model loaded" if model is not None else "❌ Model not found"
+st.caption(f"{data_source_caption}  ·  {model_status}")
+
+if model is None:
+    st.warning(
+        f"Looking for the model file at `{MODEL_PATH}` but it isn't there. "
+        f"Make sure `models/rf_model.joblib` exists at the repo root, right "
+        f"next to `app.py`, then redeploy."
     )
 
-# ── Main area ─────────────────────────────────────────────────────────────────
-with main:
-    raw = read_sensor_file()
+# ── Ingest new sample only if timestamp changed ────────────────────────────────
+ts_raw = raw["Timestamp_raw"]
+if ts_raw != st.session_state.last_ts:
+    st.session_state.last_ts = ts_raw
 
-    # Check freshness: data must be written in the last 3 seconds
-    external_sim_live = (
-        raw is not None
-        and time.time() - raw.get("Timestamp_raw", 0) < 3.0
-    )
+    prob = 0.0
+    if model is not None:
+        df = pd.DataFrame([raw])
+        df = df.drop(columns=["Timestamp_raw"], errors="ignore")
+        prob = model.predict_proba(df)[0][1] * 100
 
-    if external_sim_live:
-        # A real simulator.py process is running and feeding shared_data.json
-        st.caption("📡 Live data source: external `simulator.py` process")
-    else:
-        # No external simulator detected (e.g. running on Streamlit Cloud) —
-        # generate telemetry internally instead, so the dashboard still works.
-        st.caption("🧪 Live data source: built-in simulator (no external `simulator.py` detected)")
-        raw = get_internal_reading()
+    entry = {
+        "Timestamp":          datetime.now().strftime("%H:%M:%S"),
+        "Type":               raw["Type"],
+        "Air temperature":    raw["Air temperature"],
+        "Process temperature":raw["Process temperature"],
+        "Rotational speed":   raw["Rotational speed"],
+        "Torque":             raw["Torque"],
+        "Tool wear":          raw["Tool wear"],
+        "Failure_Prob":       prob,
+    }
+    st.session_state.history.append(entry)
+    if len(st.session_state.history) > 50:
+        st.session_state.history.pop(0)
 
-    # ── Ingest new sample only if timestamp changed ────────────────────────
-    ts_raw = raw["Timestamp_raw"]
-    if ts_raw != st.session_state.last_ts:
-        st.session_state.last_ts = ts_raw
+history = st.session_state.history
+if not history:
+    st.info("⏳ First data point arriving...")
+else:
+    df_hist  = pd.DataFrame(history)
+    last     = history[-1]
+    prob_val = last["Failure_Prob"]
+    level, color, icon = risk_level(prob_val)
 
-        # Prediction
-        prob = 0.0
-        if model is not None:
-            df = pd.DataFrame([raw])
-            df = df.drop(columns=["Timestamp_raw"], errors="ignore")
-            prob = model.predict_proba(df)[0][1] * 100
+    # ── Metrics ────────────────────────────────────────────────────────────
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Air Temp",        f"{last['Air temperature']} K")
+    c2.metric("Process Temp",    f"{last['Process temperature']} K")
+    c3.metric("Rotational Speed",f"{last['Rotational speed']} RPM")
+    c4.metric("Torque",          f"{last['Torque']} Nm")
+    c5.metric("Tool Wear",       f"{last['Tool wear']} Min")
 
-        entry = {
-            "Timestamp":          datetime.now().strftime("%H:%M:%S"),
-            "Type":               raw["Type"],
-            "Air temperature":    raw["Air temperature"],
-            "Process temperature":raw["Process temperature"],
-            "Rotational speed":   raw["Rotational speed"],
-            "Torque":             raw["Torque"],
-            "Tool wear":          raw["Tool wear"],
-            "Failure_Prob":       prob,
-        }
-        st.session_state.history.append(entry)
-        if len(st.session_state.history) > 50:
-            st.session_state.history.pop(0)
+    # ── Left: big status panel + gauge  |  Right: telemetry graph ───────────
+    left, right = st.columns([2, 3])
 
-    history = st.session_state.history
-    if not history:
-        st.info("⏳ First data point arriving...")
-    else:
-        df_hist  = pd.DataFrame(history)
-        last     = history[-1]
-        prob_val = last["Failure_Prob"]
-        level, color, icon = risk_level(prob_val)
-
-        # ── Metrics ────────────────────────────────────────────────────────
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Air Temp",        f"{last['Air temperature']} K")
-        c2.metric("Process Temp",    f"{last['Process temperature']} K")
-        c3.metric("Rotational Speed",f"{last['Rotational speed']} RPM")
-        c4.metric("Torque",          f"{last['Torque']} Nm")
-        c5.metric("Tool Wear",       f"{last['Tool wear']} Min")
-
-        st.markdown("---")
-
-        # ── Left: big status panel + gauge  |  Right: telemetry graphs ──────
-        left, right = st.columns([2, 3])
-
-        with left:
-            st.markdown(
-                f"""
-                <div style="
-                    background-color:{color}25;
-                    border: 3px solid {color};
-                    border-radius: 16px;
-                    padding: 24px 16px;
-                    text-align: center;
-                    margin-bottom: 12px;
-                ">
-                    <div style="font-size: 52px; line-height: 1;">{icon}</div>
-                    <div style="font-size: 34px; font-weight: 800; color:{color}; margin-top: 8px;">
-                        {level}
-                    </div>
-                    <div style="font-size: 16px; color: #555; margin-top: 4px;">
-                        Failure Probability: <b>{prob_val:.1f}%</b>
-                    </div>
+    with left:
+        st.markdown(
+            f"""
+            <div style="
+                background-color:{color}25;
+                border: 3px solid {color};
+                border-radius: 14px;
+                padding: 10px 12px;
+                text-align: center;
+                margin: 6px 0 4px 0;
+            ">
+                <div style="font-size: 34px; line-height: 1;">{icon}</div>
+                <div style="font-size: 26px; font-weight: 800; color:{color}; margin-top: 4px;">
+                    {level}
                 </div>
-                """,
-                unsafe_allow_html=True,
-            )
+                <div style="font-size: 14px; color: #555;">
+                    Failure Probability: <b>{prob_val:.1f}%</b>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-            fig_g = go.Figure(go.Indicator(
-                mode   = "gauge+number",
-                value  = prob_val,
-                title  = {"text": "Failure Probability (%)"},
-                domain = {"x": [0, 1], "y": [0, 1]},
-                gauge  = {
-                    "axis":      {"range": [0, 100]},
-                    "bar":       {"color": color},
-                    "bgcolor":   f"{color}15",
-                    "steps":     [
-                        {"range": [0,  30], "color": "#2ecc7133"},
-                        {"range": [30, 70], "color": "#f1c40f33"},
-                        {"range": [70,100], "color": "#e74c3c33"},
-                    ],
-                    "threshold": {"line": {"color": "#e74c3c", "width": 4},
-                                  "thickness": 0.75, "value": 90},
-                },
-            ))
-            fig_g.update_layout(height=380, margin=dict(l=10, r=10, t=40, b=10),
-                                 paper_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(fig_g, use_container_width=True)
+        fig_g = go.Figure(go.Indicator(
+            mode   = "gauge+number",
+            value  = prob_val,
+            domain = {"x": [0, 1], "y": [0, 1]},
+            gauge  = {
+                "axis":      {"range": [0, 100]},
+                "bar":       {"color": color},
+                "bgcolor":   f"{color}15",
+                "steps":     [
+                    {"range": [0,  30], "color": "#2ecc7133"},
+                    {"range": [30, 70], "color": "#f1c40f33"},
+                    {"range": [70,100], "color": "#e74c3c33"},
+                ],
+                "threshold": {"line": {"color": "#e74c3c", "width": 4},
+                              "thickness": 0.75, "value": 90},
+            },
+        ))
+        fig_g.update_layout(height=220, margin=dict(l=20, r=20, t=10, b=10),
+                             paper_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig_g, use_container_width=True)
 
-        with right:
-            st.markdown("#### Real-Time Telemetry")
+    with right:
+        # Combine both series into one dual-axis chart to save vertical space
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=df_hist["Timestamp"], y=df_hist["Torque"],
+            mode="lines", name="Torque (Nm)", line=dict(color="orange"),
+        ))
+        fig.add_trace(go.Scatter(
+            x=df_hist["Timestamp"], y=df_hist["Process temperature"],
+            mode="lines", name="Process Temp (K)", line=dict(color="red"),
+            yaxis="y2",
+        ))
+        fig.update_layout(
+            title="Real-Time Telemetry — Torque & Process Temperature",
+            height=300,
+            margin=dict(l=0, r=0, t=40, b=0),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            yaxis=dict(title="Torque (Nm)"),
+            yaxis2=dict(title="Process Temp (K)", overlaying="y", side="right"),
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
-            fig_t = go.Figure()
-            fig_t.add_trace(go.Scatter(
-                x=df_hist["Timestamp"], y=df_hist["Torque"],
-                mode="lines", name="Torque (Nm)", line=dict(color="orange")
-            ))
-            fig_t.update_layout(title="Torque Over Time",
-                                 height=300, margin=dict(l=0, r=0, t=30, b=0))
-            st.plotly_chart(fig_t, use_container_width=True)
+    # ── Bottom: Recommended Action tab ───────────────────────────────────────
+    tab_action, = st.tabs(["🔧 Recommended Action"])
+    with tab_action:
+        headline, body, findings = build_recommendation(level, last)
 
-            fig_p = go.Figure()
-            fig_p.add_trace(go.Scatter(
-                x=df_hist["Timestamp"], y=df_hist["Process temperature"],
-                mode="lines", name="Process Temp (K)", line=dict(color="red")
-            ))
-            fig_p.update_layout(title="Temperature Over Time",
-                                 height=300, margin=dict(l=0, r=0, t=30, b=0))
-            st.plotly_chart(fig_p, use_container_width=True)
+        if level == "SAFE":
+            st.success(f"**{headline}** {body}")
+        elif level == "WARNING":
+            st.warning(f"**{headline}** {body}")
+        else:
+            st.error(f"**{headline}** {body}")
 
-        # ── Bottom: Recommended Action tab ──────────────────────────────────
-        st.markdown("---")
-        tab_action, = st.tabs(["🔧 Recommended Action"])
-        with tab_action:
-            headline, body, findings = build_recommendation(level, last)
-
-            if level == "SAFE":
-                st.success(f"**{headline}**  \n{body}")
-            elif level == "WARNING":
-                st.warning(f"**{headline}**  \n{body}")
-            else:
-                st.error(f"**{headline}**  \n{body}")
-
-            st.markdown("**Findings:**")
-            for f in findings:
-                st.markdown(f"- {f}")
+        st.markdown("  ·  ".join(findings))
 
 # ── Auto-refresh every 1 second ───────────────────────────────────────────────
 time.sleep(1)
