@@ -206,11 +206,15 @@ model_status = "✅ Random Forest model loaded" if model is not None else "❌ M
 st.caption(f"{data_source_caption}  ·  {model_status}")
 
 if model is None:
+    try:
+        root_files = sorted(os.listdir(BASE_DIR))
+    except Exception:
+        root_files = ["(could not list directory)"]
     st.warning(
-        f"Looking for the model file at `{MODEL_PATH}` but it isn't there. "
-        f"Make sure `models/rf_model.joblib` exists at the repo root, right "
-        f"next to `app.py`, then redeploy."
+        f"Looking for the model file at `{MODEL_PATH}` but it isn't there.\n\n"
+        f"Files Streamlit actually finds in this app's root folder:\n"
     )
+    st.code("\n".join(root_files))
 
 # ── Ingest new sample only if timestamp changed ────────────────────────────────
 ts_raw = raw["Timestamp_raw"]
@@ -283,21 +287,23 @@ else:
         fig_g = go.Figure(go.Indicator(
             mode   = "gauge+number",
             value  = prob_val,
+            number = {"suffix": "%", "font": {"size": 34}},
+            title  = {"text": "Risk Score", "font": {"size": 14}},
             domain = {"x": [0, 1], "y": [0, 1]},
             gauge  = {
                 "axis":      {"range": [0, 100]},
-                "bar":       {"color": color},
-                "bgcolor":   f"{color}15",
+                "bar":       {"color": color, "thickness": 0.3},
+                "bgcolor":   "rgba(0,0,0,0)",
                 "steps":     [
-                    {"range": [0,  30], "color": "#2ecc7133"},
-                    {"range": [30, 70], "color": "#f1c40f33"},
-                    {"range": [70,100], "color": "#e74c3c33"},
+                    {"range": [0,  30], "color": "#2ecc71"},
+                    {"range": [30, 70], "color": "#f4d03f"},
+                    {"range": [70,100], "color": "#e74c3c"},
                 ],
-                "threshold": {"line": {"color": "#e74c3c", "width": 4},
+                "threshold": {"line": {"color": "white", "width": 4},
                               "thickness": 0.75, "value": 90},
             },
         ))
-        fig_g.update_layout(height=220, margin=dict(l=20, r=20, t=10, b=10),
+        fig_g.update_layout(height=240, margin=dict(l=20, r=20, t=30, b=10),
                              paper_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig_g, use_container_width=True)
 
