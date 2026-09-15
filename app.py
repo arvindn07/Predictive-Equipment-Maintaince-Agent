@@ -31,7 +31,8 @@ st.markdown(
 # to: os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SHARED_DATA_FILE = os.path.join(BASE_DIR, "data", "shared_data.json")
-MODEL_PATH       = os.path.join(BASE_DIR, "models", "rf_model.joblib")
+# rf_model.joblib sits directly at the repo root (no models/ subfolder)
+MODEL_PATH       = os.path.join(BASE_DIR, "rf_model.joblib")
 
 # ── Baseline ("healthy") sensor values, taken from the simulator's normal state ─
 BASELINES = {
@@ -334,7 +335,8 @@ else:
         else:
             st.error(f"**{headline}** {body}")
 
-        st.markdown("  ·  ".join(findings))
+        for f in findings:
+            st.markdown(f"- {f}")
 
 # ── Auto-refresh every 1 second ───────────────────────────────────────────────
 time.sleep(1)
