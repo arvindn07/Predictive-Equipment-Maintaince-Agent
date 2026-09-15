@@ -44,13 +44,29 @@ BASELINES = {
 }
 
 # ── Load Model (cached so it only loads once) ─────────────────────────────────
-@st.cache_resource
-def load_model():
+def find_model_file():
+    """Locate the model file, tolerating filename case/whitespace quirks."""
     if os.path.exists(MODEL_PATH):
-        return joblib.load(MODEL_PATH)
+        return MODEL_PATH
+    try:
+        for name in os.listdir(BASE_DIR):
+            if name.strip().lower() == "rf_model.joblib":
+                return os.path.join(BASE_DIR, name)
+    except Exception:
+        pass
     return None
 
-model = load_model()
+@st.cache_resource
+def load_model():
+    path = find_model_file()
+    if not path:
+        return None, None
+    try:
+        return joblib.load(path), None
+    except Exception as e:
+        return None, str(e)
+
+model, model_error = load_model()
 
 # ── Session-state defaults ────────────────────────────────────────────────────
 if "history" not in st.session_state:
@@ -207,14 +223,24 @@ st.caption(f"{data_source_caption}  ·  {model_status}")
 
 if model is None:
     try:
-        root_files = sorted(os.listdir(BASE_DIR))
+        details = []
+        for name in sorted(os.listdir(BASE_DIR)):
+            full = os.path.join(BASE_DIR, name)
+            try:
+                size = os.path.getsize(full)
+            except Exception:
+                size = "?"
+            details.append(f"{name}   ({size} bytes)")
     except Exception:
-        root_files = ["(could not list directory)"]
+        details = ["(could not list directory)"]
+
     st.warning(
-        f"Looking for the model file at `{MODEL_PATH}` but it isn't there.\n\n"
-        f"Files Streamlit actually finds in this app's root folder:\n"
+        f"Looking for the model file at `{MODEL_PATH}` but couldn't load it.\n\n"
+        f"Files Streamlit actually finds in this app's root folder (with sizes):"
     )
-    st.code("\n".join(root_files))
+    st.code("\n".join(details))
+    if model_error:
+        st.error(f"Error while loading the file: {model_error}")
 
 # ── Ingest new sample only if timestamp changed ────────────────────────────────
 ts_raw = raw["Timestamp_raw"]
